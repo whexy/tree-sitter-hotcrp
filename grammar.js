@@ -11,36 +11,43 @@ module.exports = grammar({
   name: "hotcrp",
 
   // Keep newlines as extras so we can write line-based rules cleanly
-  extras: ($) => [/\r?\n/],
+  extras: ($) => [/[ \t]+/],
 
   rules: {
-    source_file: ($) => seq(repeat($.preamble_line), repeat($.section)),
+    source_file: ($) => seq(repeat($.preamble_block), repeat($.section)),
 
-    // Lines that are allowed only before the first section
-    preamble_line: ($) => choice($.metadata, $.comment, $.regular_line),
+    // Before the first section: allow meta_line/comment_line or free-form blocks
+    preamble_block: ($) =>
+      choice($.meta_line, $.comment_line, $.block, $.blank),
 
-    // A section: header followed by any number of non-header lines.
     section: ($) =>
       prec.right(
         seq(
-          field("header", $.section_header),
-          repeat(choice($.metadata, $.comment, $.regular_line)),
+          $.section_header,
+          repeat(choice($.meta_line, $.comment_line, $.block, $.blank)),
         ),
       ),
 
-    // Marked line types — assume the markers start at the beginning of the line
-    section_header: ($) => seq("==*==", field("text", $.line_text)),
-    metadata: ($) => seq("==+==", field("text", $.line_text)),
-    comment: ($) => seq("==-==", field("text", $.line_text)),
+    // Marked lines
+    section_header: ($) =>
+      prec.left(seq("==*==", $.marker_text, optional($._nl))),
+    meta_line: ($) => prec.left(seq("==+==", $.marker_text, optional($._nl))),
+    comment_line: ($) =>
+      prec.left(seq("==-==", $.marker_text, optional($._nl))),
+    marker_text: (_) => token.immediate(/[ \t]*[^\n]+/),
 
-    // Regular line: any line that DOES NOT start with '='.
-    // This avoids lookahead; if a line starts with '=', one of the marked rules will match it first.
-    regular_line: ($) => field("text", $.line_text_nostart_eq),
+    // Regular block
+    block: ($) =>
+      prec.right(
+        seq($.line, repeat(choice($.line, $.blank)), optional($.text)),
+      ),
+    line: ($) => seq($.text, $._nl),
+    blank: ($) => seq(optional(/[ \t]+/), $._nl),
 
-    // Text after a marker: optional space(s) then the payload (non-newline)
-    line_text: (_) => token.immediate(/[ \t]*[^\n]+/),
-
-    // A non-marker line: first char is NOT '=' (then the rest until newline)
-    line_text_nostart_eq: (_) => token(/[^=\n][^\n]*/),
+    text: (_) =>
+      token(
+        /(?:[^=\n][^\n]*|=[^=\n][^\n]*|==[^*+\-\n][^\n]*|==[*+\-][^=\n][^\n]*|==[*+\-]=[^=\n][^\n]*)/,
+      ),
+    _nl: (_) => /\r?\n/,
   },
 });
